@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shpd-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shpd-frontend
+  template:
+    metadata:
+      labels:
+        app: shpd-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: rodolgiaco/shpd-frontend:9.0
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

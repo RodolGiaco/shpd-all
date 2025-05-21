@@ -1,0 +1,8 @@
+opencv-python-headless
+websockets
+mediapipe
+numpy
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
