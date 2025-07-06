@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from telegram import Bot
 import json
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7600712992:AAGKYF0lCw7h7B-ROthuOKlb90QZM20MZis")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7796011838:AAGFuQRg2OdEhYT-Cqvg_mGRIOeKWkYNSic")
 bot = Bot(token=TELEGRAM_TOKEN)
 
 app = FastAPI()
