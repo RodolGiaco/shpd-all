@@ -93,7 +93,7 @@ graph TB
     INIT -->|Detecta modo| CONFIG
     INIT -->|Sin config| AP_MODE
     INIT -->|Con config| CLIENT_MODE
-    CLIENT_MODE -->|WebSocket<br/>JPEG frames<br/>ws://backend:8765/video/input/{device_id}| BACKEND
+    CLIENT_MODE -->|WebSocket<br/>JPEG frames<br/>ws://backend:8765/video/input/device_id| BACKEND
 
     %% 3. Flujo de Procesamiento
     BACKEND -->|Frames| FASTAPI
