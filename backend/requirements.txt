@@ -1,0 +1,11 @@
+opencv-python-headless
+websockets
+mediapipe
+numpy
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+redis
+openai>=0.27.0
+requests

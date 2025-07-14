@@ -1,0 +1,14 @@
+[Unit]
+Description=SHPD - Inicialización automática (Hotspot o Streaming)
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/bash -c 'for i in {1..10}; do ip link show wlan0 | grep "state UP" && break || sleep 1; done'
+ExecStart=/bin/bash -c '/home/rodo/shpd-init.sh'
+RemainAfterExit=true
+User=rodo
+
+[Install]
+WantedBy=multi-user.target

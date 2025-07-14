@@ -1,0 +1,17 @@
+[Unit]
+Description=Servidor de configuración SHPD (modo hotspot)
+After=network.target
+Wants=network.target
+
+[Service]
+WorkingDirectory=/home/rodo
+ExecStart=/usr/bin/python3 /home/rodo/setup_server.py
+WorkingDirectory=/home/rodo
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=2
+User=rodo
+
+[Install]
+WantedBy=multi-user.target

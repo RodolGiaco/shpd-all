@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shpd-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shpd-backend
+  template:
+    metadata:
+      labels:
+        app: shpd-backend
+    spec:
+      containers:
+      - name: backend
+        image: shpd-backend:1.7.0
+        ports:
+        - containerPort: 8765
+          hostPort: 8765
+          protocol: TCP
+        - containerPort: 8000 
+        env:
+        - name: DATABASE_URL
+          value: postgresql://user:password@postgres-service:5432/shpd_db
+        resources:
+          requests:
+            memory: "3000Mi"
+            cpu: "200m"
+          limits:
+            memory: "30000Mi"
+            cpu: "400m"
