@@ -95,7 +95,7 @@ class PostureMonitor:
         if lm is None:
             delta = 1.0 / fps       
             r.hincrbyfloat(buffer_key, "tiempo_parado", round(delta,1))
-            return image
+            return image, keypoints
 
         r_shldr_x = int(lm.landmark[lmPose.RIGHT_SHOULDER].x * w)
         r_shldr_y = int(lm.landmark[lmPose.RIGHT_SHOULDER].y * h)
@@ -208,7 +208,7 @@ class PostureMonitor:
             if bad_time > 0:
                 r.hincrbyfloat(calib_key, "bad_time", round(1.0 / fps, 2))
 
-        return image
+        return image, keypoints
 
     def run(self):
         cap = cv2.VideoCapture(self.args.video) if self.args.video else cv2.VideoCapture(0)
@@ -219,7 +219,7 @@ class PostureMonitor:
                 print("Null.Frames")
                 break
 
-            image = self.process_frame(image)
+            image, keypoints = self.process_frame(image)
             cv2.imshow('MediaPipe Pose', image)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):

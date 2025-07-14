@@ -10,7 +10,6 @@ import redis
 import base64
 import logging.config
 from contextlib import asynccontextmanager
-from openai import OpenAI
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -19,6 +18,8 @@ from api.database import Base, engine, SessionLocal
 from posture_monitor import PostureMonitor
 from api.routers import sesiones, pacientes, metricas, analysis, postura_counts, timeline, calibracion
 from datetime import datetime
+from neural_network.pose_recognition import PoseRecognizer
+from instructions.gesture_buffer import GestureBuffer
 
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 
@@ -74,168 +75,102 @@ logger = logging.getLogger("shpd-backend")
 logger.setLevel(logging.DEBUG)
 
 
-# ——— CONFIGURACIÓN DEL CLIENTE DE OPENAI ———
-API_KEY = os.getenv(
-    "OPENAI_API_KEY",
-    "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"
-)
-client = OpenAI(api_key=API_KEY)
-MODEL = "gpt-4o-mini"
-
-def build_openai_messages(b64: str) -> list[dict]:
-    """
-    Construye la lista de mensajes para enviar a la API de OpenAI GPT-4 Vision,
-    solicitando que, en lugar de booleanos, devuelva porcentajes (0–100) 
-    que indiquen la predominancia estimada de cada postura.
-
-    - b64: cadena Base64 de la imagen (sin prefijo MIME).
-    Devuelve una lista de diccionarios con los roles y contenidos formateados.
-    """
-
-    # 1) Prompt del sistema: define el rol y las 13 posturas, 
-    #    indicando que debe devolver porcentajes 0–100 en JSON.
-    SYSTEM_PROMPT = """Eres un asistente de clasificación de posturas basado en visión.
-Cuando recibas una imagen, analiza la postura de la persona 
-qué tan predominante es cada una de las siguientes 13 posturas al sentarse.
-Las posturas son:
-- Sentado erguido
-- Inclinación hacia adelante
-- Inclinación hacia atrás
-- Inclinación hacia la izquierda
-- Inclinación hacia la derecha
-- Mentón en mano
-- Piernas cruzadas
-- Rodillas elevadas o muy bajas
-- Hombros encogidos
-- Brazos sin apoyo
-- Cabeza adelantada
-- Encorvarse hacia adelante
-- Sentarse en el borde del asiento
-
-
-Determina y devuelve estrictamente un objeto JSON, sin cercos de código circundante,
-formato markdown o cualquier texto extra-sólo el propio JSON».
-En lugar de un valor booleano, para cada postura devuelve un porcentaje entre 0 y 100 
-(0 = nada probable / no se aprecia, 100 = completamente predominante). 
-El JSON debe tener cada postura como clave exacta y su valor numérico como porcentaje.
-Proporciona ÚNICAMENTE el objeto JSON como salida, sin texto adicional."""
-
-    # 2) Prompt del usuario (texto): instrucción breve para clasificar la imagen con porcentajes.
-    user_prompt = (
-        "Analiza la imagen adjunta y genera un JSON con los 13 tipos de postura "
-        "listados en el mensaje de sistema. Para cada postura, coloca un número "
-        "entero de 0 a 100 que indique la probabilidad o predominancia estimada. "
-        "No incluyas explicaciones; solo devuelve el objeto JSON."
-    )
-
-    # 3) Construcción de content para el usuario, usando tipo "text" + "image_url"
-    user_content = [
-        {"type": "text", "text": user_prompt},
-        {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{b64}",
-                "details": "high"
-            }
-        }
-    ]
-
-    # 4) Devolver la lista de mensajes con roles "system" y "user"
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user",   "content": user_content}
-    ]
+# ——— CONFIGURACIÓN DEL MODELO TFLITE LOCAL ———
+pose_recognizer = PoseRecognizer(model_path='model/keypoint_classifier.tflite')
 
 # ——— COLAS ASÍNCRONAS ———
 processed_frames_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
 api_analysis_queue: asyncio.Queue = asyncio.Queue()
 _triggered_sessions = set()  # para disparar clasificación sólo una vez por umbral
 
-# ——— WORKER PARA LLAMADAS A OPENAI ———
+# ——— WORKER PARA ANÁLISIS CON MODELO TFLITE ———
 async def api_analysis_worker():
     """
     Worker que consume de api_analysis_queue payloads con:
-      { session_id, b64, exercise }
-    Llama a OpenAI y guarda el JSON resultante en Redis bajo analysis:{session_id}.
+      { session_id, frame, keypoints, bad_time }
+    Usa el modelo TFLite local y guarda el resultado en Redis.
     """
     loop = asyncio.get_running_loop()
-    logger.debug("🔄 API analysis worker iniciado")
+    logger.debug("🔄 TFLite analysis worker iniciado")
     while True:
         payload = await api_analysis_queue.get()
         session_id = payload["session_id"]
-        jpeg        = payload["jpeg"]
-        bad_time    = payload["bad_time"]
-        b64 = base64.b64encode(jpeg).decode("utf-8")
+        frame = payload["frame"]
+        keypoints = payload["keypoints"]
+        bad_time = payload["bad_time"]
+        
         try:
-            messages = build_openai_messages(b64)
-            # Llamada a OpenAI en executor para no bloquear el loop
-            response = await loop.run_in_executor(
+            # Ejecutar la clasificación con el modelo TFLite
+            gesture_id, labels = await loop.run_in_executor(
                 None,
-                lambda: client.chat.completions.create(
-                    user=session_id,
-                    model=MODEL,
-                    messages=messages,
-                    temperature=0,
-                    max_tokens=500
-                )
+                pose_recognizer.recognize_pose,
+                keypoints,
+                frame
             )
-            content = response.choices[0].message.content
-            logger.debug(content)
-            result: dict[str, bool] = json.loads(content)
-            r.hset(f"analysis:{session_id}", mapping=result)
-            logger.debug(f"✔️ Analysis saved for session {session_id}")
             
-            
-            
-            if result:
-               # Encontrar la clave cuyo valor sea máximo
-               top_label, top_value = max(result.items(), key=lambda kv: kv[1])
-               # 3) Abrir sesión de DB para hacer upsert en PosturaCount
-               db = SessionLocal()
-               try:
-                   # Intentar obtener la fila existente
-                   fila = (
-                       db.query(PosturaCount)
-                       .filter(
-                           PosturaCount.session_id == session_id,
-                           PosturaCount.posture_label == top_label
-                       )
-                       .first()
-                   )
-                   if fila:
-                       # Si existe, incrementamos el contador
-                       fila.count += 1
-                       db.add(fila)
-                   else:
-                       # Si no existe, creamos una nueva fila
-                       nueva = PosturaCount(
-                           session_id=session_id,
-                           posture_label=top_label,
-                           count=1
-                       )
-                       db.add(nueva)
-                   db.commit()
-                   logger.debug(f"✔️ PostureCount updated: {session_id} - {top_label}")
-                   # Guardar evento de timeline
-                   try:
-                       evt = {
-                           "timestamp": datetime.utcnow().isoformat(),
-                           "postura": top_label,
-                           "tiempo_mala_postura": bad_time
-                       }
-                       r.rpush(f"timeline:{session_id}", json.dumps(evt))
-                       r.ltrim(f"timeline:{session_id}", -200, -1)
-                   except Exception:
-                       logger.exception("Error guardando timeline")
-               except Exception:
-                   logger.exception("Error actualizando PosturaCount en DB")
-                   db.rollback()
-               finally:
-                   db.close()
-            
+            # Traducir el ID a nombre de gesto
+            if gesture_id is not None and gesture_id >= 0 and gesture_id < len(labels):
+                posture_name = labels[gesture_id]
+                
+                # Crear un resultado compatible con el formato anterior
+                # Asignamos 100% a la postura detectada y 0% al resto
+                result = {}
+                
+                # Las etiquetas del modelo ya contienen las 13 posturas correctas
+                for i, label in enumerate(labels):
+                    result[label] = 100 if i == gesture_id else 0
+                
+                # Guardar en Redis
+                r.hset(f"analysis:{session_id}", mapping=result)
+                logger.debug(f"✔️ TFLite analysis saved for session {session_id}: {posture_name}")
+                
+                # Actualizar PosturaCount en la base de datos
+                if posture_name:
+                    db = SessionLocal()
+                    try:
+                        # Intentar obtener la fila existente
+                        fila = (
+                            db.query(PosturaCount)
+                            .filter(
+                                PosturaCount.session_id == session_id,
+                                PosturaCount.posture_label == posture_name
+                            )
+                            .first()
+                        )
+                        if fila:
+                            # Si existe, incrementamos el contador
+                            fila.count += 1
+                            db.add(fila)
+                        else:
+                            # Si no existe, creamos una nueva fila
+                            nueva = PosturaCount(
+                                session_id=session_id,
+                                posture_label=posture_name,
+                                count=1
+                            )
+                            db.add(nueva)
+                        db.commit()
+                        logger.debug(f"✔️ PostureCount updated: {session_id} - {posture_name}")
+                        
+                        # Guardar evento de timeline
+                        try:
+                            evt = {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "postura": posture_name,
+                                "tiempo_mala_postura": bad_time
+                            }
+                            r.rpush(f"timeline:{session_id}", json.dumps(evt))
+                            r.ltrim(f"timeline:{session_id}", -200, -1)
+                        except Exception:
+                            logger.exception("Error guardando timeline")
+                    except Exception:
+                        logger.exception("Error actualizando PosturaCount en DB")
+                        db.rollback()
+                    finally:
+                        db.close()
             
         except Exception:
-            logger.exception("Error en análisis OpenAI")
+            logger.exception("Error en análisis TFLite")
         finally:
             api_analysis_queue.task_done()
             
@@ -244,7 +179,7 @@ async def api_analysis_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(api_analysis_worker())
-    logger.debug("✅ API analysis worker scheduled")
+    logger.debug("✅ TFLite analysis worker scheduled")
     yield  
     
 app = FastAPI(lifespan=lifespan)
@@ -312,27 +247,31 @@ async def video_input(websocket: WebSocket, device_id: str):
             if posture_monitor is None:
                 # Si no hay PostureMonitor, enviar frame sin procesar
                 jpeg = await loop.run_in_executor(None, _encode_jpeg, frame)
+                keypoints = None
             else:
-                processed = await loop.run_in_executor(None, posture_monitor.process_frame, frame)
+                # process_frame ahora devuelve tupla (frame, keypoints)
+                result = await loop.run_in_executor(None, posture_monitor.process_frame, frame)
+                processed, keypoints = result
                 jpeg = await loop.run_in_executor(None, _encode_jpeg, processed)
             
             if processed_frames_queue.full():
                 processed_frames_queue.get_nowait()
             await processed_frames_queue.put(jpeg)
 
-            # 4. Dispara análisis OpenAI si guardaron un frame crudo (solo si hay session_id válido)
-            if posture_monitor is not None and not calibrating:
+            # 4. Dispara análisis TFLite si guardaron un frame crudo (solo si hay session_id válido)
+            if posture_monitor is not None and not calibrating and keypoints is not None:
                 raw_key = f"raw_frame:{session_id}"
                 flag_value = r.hget(raw_key, "flag_alert")  
                 bad_time = r.hget(raw_key, "bad_time")  
                 if flag_value == "1":
                     await api_analysis_queue.put({
                         "session_id": session_id,
-                        "jpeg": jpeg,
+                        "frame": frame,  # Enviamos el frame original, no el JPEG
+                        "keypoints": keypoints,  # Enviamos los keypoints de MediaPipe
                         "bad_time": bad_time
                     })
                     r.delete(raw_key)
-                    logger.debug(f"✔️ Disparo para analisis ejecutado para sesión {session_id}")
+                    logger.debug(f"✔️ Disparo para análisis TFLite ejecutado para sesión {session_id}")
                 
     except WebSocketDisconnect:
         logger.info(f"WebSocket desconectado para device_id: {device_id}")

@@ -1,0 +1,29 @@
+{
+    "model_paths": {
+        "pose_recogniser": "model/keypoint_classifier.tflite",
+        "keypoint_classifier_labels": "model/keypoint_classifier_label.csv"
+    },
+
+    "initial_options": {
+        "following": false
+    },
+
+    "constants": {
+        "pose": {
+            "min_pose_detection_confidence": 0.6,
+            "min_pose_presence_confidence": 0.3,
+            "min_tracking_confidence": 0.3,
+            "safe_zone": true
+        },
+        "gui": {
+            "hand_window_width": 300,
+            "hand_window_height": 300,
+            "show_battery": false
+        },
+        "buffer_length": 6,
+        "speed": 40,
+        "webcam_number": 0
+    },
+
+    "simulation": true
+}
