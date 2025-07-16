@@ -77,7 +77,7 @@ logger.setLevel(logging.DEBUG)
 # ——— CONFIGURACIÓN DEL CLIENTE DE OPENAI ———
 API_KEY = os.getenv(
     "OPENAI_API_KEY",
-    "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"
+    "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"
 )
 client = OpenAI(api_key=API_KEY)
 MODEL = "gpt-4o-mini"
