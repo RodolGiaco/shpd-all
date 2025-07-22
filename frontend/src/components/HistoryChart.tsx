@@ -37,7 +37,7 @@ const HistoryChart: React.FC<Props> = ({ sesionId }) => {
   // Polling para obtener conteo de posturas desde el endpoint /postura_counts/{sesionId}
   useEffect(() => {
     const fetchData = () => {
-      fetch(`http://${window.location.hostname}:8765/postura_counts/${sesionId}`)
+      fetch(`https://api.shpd.waly.cloud/postura_counts/${sesionId}`)
         .then((res) => res.json())
         .then((data: { posture_label: string; count: number }[]) => {
           // Convertimos la respuesta a HistorialPosturalItem[]

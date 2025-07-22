@@ -31,7 +31,7 @@ export default function App() {
     const fetchTimeline = async () => {
       try {
         const res = await fetch(
-          `http://${window.location.hostname}:8765/timeline/${session.id}`
+          `https://api.shpd.walry.cloud/timeline/${session.id}`
         );
         const data: TimelineEntry[] = await res.json();
         setTimeline(data);
@@ -62,7 +62,7 @@ export default function App() {
 
     (async () => {
       try {
-        const res = await fetch(`http://${window.location.hostname}:8765/pacientes/${deviceId}`);
+        const res = await fetch(`https://api.shpd.walry.cloud/pacientes/${deviceId}`);
         if (!res.ok) {
           throw new Error(`Error al obtener paciente: ${res.statusText}`);
         }
@@ -79,7 +79,7 @@ export default function App() {
     (async () => {
       try {
         const res = await fetch(
-          `http://${window.location.hostname}:8765/sesiones/`
+          `https://api.shpd.walry.cloud/sesiones/`
         );
         const sessions: SessionData[] = await res.json();
         if (sessions.length > 0) {
@@ -109,7 +109,7 @@ export default function App() {
     const interval = setInterval(async () => {
       try {
         const res = await fetch(
-          `http://${window.location.hostname}:8765/sesiones/progress/${session.id}`
+          `https://api.shpd.walry.cloud/sesiones/progress/${session.id}`
         );
         const data: SessionProgressData = await res.json();
         setProgress(data);
@@ -130,7 +130,7 @@ export default function App() {
       // Verifica si ya se envió el reporte
       if (localStorage.getItem(`session_ended_${deviceId}`) === "true") return;
 
-      fetch(`http://${window.location.hostname}:8765/sesiones/end/${deviceId}`, {
+      fetch(`https://api.shpd.walry.cloud/sesiones/end/${deviceId}`, {
         method: "POST",
       })
         .then(res => res.json())
@@ -155,7 +155,7 @@ export default function App() {
       localStorage.removeItem(`session_ended_${deviceId}`);
 
       // Llamo al backend pero no bloqueo la navegación por la respuesta
-      fetch(`http://${window.location.hostname}:8765/sesiones/reiniciar/${session?.id ?? ""}?device_id=${deviceId}`,
+      fetch(`https://api.shpd.walry.cloud/sesiones/reiniciar/${session?.id ?? ""}?device_id=${deviceId}`,
         { method: "POST" }
       ).catch(() => {/* silenciar error, se mostrará en próximo ciclo si falla */});
 

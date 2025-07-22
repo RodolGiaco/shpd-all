@@ -38,7 +38,7 @@ const CalibracionMonitor: React.FC<Props> = ({ onFinish, autoStart = true }) => 
     if (sessionId || !deviceId) return;
     (async () => {
       try {
-        const res = await fetch(`http://${window.location.hostname}:8765/sesiones/?device_id=${deviceId}`);
+        const res = await fetch(`https://api.shpd.walry.cloud/sesiones/?device_id=${deviceId}`);
         if (!res.ok) return;
         const sesiones: { id: string; modo: string }[] = await res.json();
         if (sesiones.length > 0) {
@@ -51,7 +51,7 @@ const CalibracionMonitor: React.FC<Props> = ({ onFinish, autoStart = true }) => 
   /* —— Video WebSocket —— */
   useEffect(() => {
     const host = window.location.hostname;
-    const ws = new WebSocket(`ws://${host}:8765/video/output?device_id=${deviceId}`);
+    const ws = new WebSocket(`wss://api.shpd.walry.cloud/video/output?device_id=${deviceId}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = (e) => {
       // Si es mensaje de control (modo calibracion)
@@ -86,7 +86,7 @@ const CalibracionMonitor: React.FC<Props> = ({ onFinish, autoStart = true }) => 
     if (!calibrando || !sessionId) return;
     const interval = setInterval(async () => {
       try {
-        const url = `http://${window.location.hostname}:8765/calib/progress/${sessionId}`;
+        const url = `https://api.shpd.walry.cloud/calib/progress/${sessionId}`;
         const { good_time, correcta } = await fetch(url).then(r => r.json());
 
         // postura coincide con fase
@@ -116,7 +116,7 @@ const CalibracionMonitor: React.FC<Props> = ({ onFinish, autoStart = true }) => 
       (async () => {
         try {
           await fetch(
-            `http://${window.location.hostname}:8765/calib/mode/${deviceId}/normal`,
+            `https://api.shpd.walry.cloud/calib/mode/${deviceId}/normal`,
             { method: "POST" }
           );
           setModoCambiado(true);

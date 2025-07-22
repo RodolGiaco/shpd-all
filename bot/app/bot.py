@@ -318,7 +318,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logging.error("No se pudo guardar la sesión en Redis.")
 
             # Devuelve la URL con el session_id y el device_id al usuario en un mensaje aparte, interactivo
-            url = f"http://172.18.0.2:30080/?session_id={session_id}&device_id={device_id}"
+            url = f"http://app.shpd.warly.cloud/?session_id={session_id}&device_id={device_id}"
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🎥 Ver monitoreo en vivo", url=url)]
             ])

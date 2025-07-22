@@ -17,7 +17,7 @@ const PostureCard: React.FC<Props> = ({ sesionId }) => {
   // Polling de métricas cada segundo
   useEffect(() => {
     const interval = setInterval(() => {
-      fetch(`http://${window.location.hostname}:8765/metricas/${sesionId}`)
+      fetch(`https://api.shdp.walry.cloud/metricas/${sesionId}`)
         .then((res) => res.json())
         .then((data) => setPostura(data))
         .catch(console.error);
@@ -29,7 +29,7 @@ const PostureCard: React.FC<Props> = ({ sesionId }) => {
   // Polling de análisis cada segundo
   useEffect(() => {
     const interval = setInterval(() => {
-      fetch(`http://${window.location.hostname}:8765/analysis/${sesionId}`)
+      fetch(`https://api.shdp.walry.cloud/analysis/${sesionId}`)
         .then((res) => res.json())
         .then((data: AnalysisResponse) => setAnalysis(data))
         .catch(console.error);
@@ -72,7 +72,7 @@ const PostureCard: React.FC<Props> = ({ sesionId }) => {
   // WebSocket para streaming de video
   useEffect(() => {
     const ws = new WebSocket(
-      `ws://${window.location.hostname}:8765/video/output`
+      `wss://api.shdp.walry.cloud/video/output`
     );
     ws.binaryType = "arraybuffer";
 

@@ -112,6 +112,9 @@ Las posturas son:
 - Encorvarse hacia adelante
 - Sentarse en el borde del asiento
 
+• Cabeza adelantada: sólo la cabeza proyectada hacia delante, columna y hombros alineados.  
+• Inclinación hacia adelante: tronco rígido inclinado unos grados sin curvear la espalda.  
+• Encorvarse hacia adelante: columna superior curva, hombros caídos y zona torácica flexionada.  
 
 Determina y devuelve estrictamente un objeto JSON, sin cercos de código circundante,
 formato markdown o cualquier texto extra-sólo el propio JSON».
