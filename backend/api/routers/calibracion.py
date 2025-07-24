@@ -2,7 +2,8 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 import redis
 import logging
-
+from app.core.ws_manager import ws_manager
+from starlette.websockets import WebSocketState
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 logger = logging.getLogger("calibracion")
 logger.setLevel(logging.DEBUG)
@@ -36,3 +37,13 @@ def set_mode(device_id: str, mode: str):
     key = f"shpd-data:{device_id}"
     r.hset(key, mapping={"mode": mode})
     return {"device_id": device_id, "mode": mode}
+
+
+@router.post("/force-restart/{device_id}")
+async def force_restart(device_id: str):
+    ws = ws_manager.inputs.get(device_id)
+    if not ws:
+        return {"closed": False, "reason": "not_connected"}
+    if ws.application_state == WebSocketState.CONNECTED:
+        await ws.close(code=4000, reason="force_restart")
+    return {"closed": True}

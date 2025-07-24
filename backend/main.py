@@ -13,16 +13,22 @@ from contextlib import asynccontextmanager
 from openai import OpenAI
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 import uvicorn
 from api.models import Sesion, Paciente, MetricaPostural, PosturaCount
 from api.database import Base, engine, SessionLocal
 from posture_monitor import PostureMonitor
 from api.routers import sesiones, pacientes, metricas, analysis, postura_counts, timeline, calibracion
 from datetime import datetime
+from app.core.ws_manager import ws_manager
+import requests
+from functools import partial
 
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 
+input_ws_by_device: dict[str, WebSocket] = {}
 
+BOT_API_URL = "http://bot-api-service:8000/send_report" 
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -96,21 +102,20 @@ def build_openai_messages(b64: str) -> list[dict]:
     #    indicando que debe devolver porcentajes 0–100 en JSON.
     SYSTEM_PROMPT = """Eres un asistente de clasificación de posturas basado en visión.
 Cuando recibas una imagen, analiza la postura de la persona 
-qué tan predominante es cada una de las siguientes 13 posturas al sentarse.
+qué tan predominante es cada una de las siguientes 12 posturas al sentarse.
 Las posturas son:
-- Sentado erguido
-- Inclinación hacia adelante
-- Inclinación hacia atrás
-- Inclinación hacia la izquierda
-- Inclinación hacia la derecha
+- Tronco flexionado
+- Tronco extendido
+- Tronco inclinado lateral izquierda
+- Tronco inclinado lateral derecho
 - Mentón en mano
 - Piernas cruzadas
 - Rodillas elevadas o muy bajas
-- Hombros encogidos
-- Brazos sin apoyo
+- Elevación escapular
+- Antebrazo sin apoyo
 - Cabeza adelantada
-- Encorvarse hacia adelante
-- Sentarse en el borde del asiento
+- Cifosis torácica aumentada
+- Pelvis adelantada respecto respaldo
 
 
 Determina y devuelve estrictamente un objeto JSON, sin cercos de código circundante,
@@ -122,7 +127,7 @@ Proporciona ÚNICAMENTE el objeto JSON como salida, sin texto adicional."""
 
     # 2) Prompt del usuario (texto): instrucción breve para clasificar la imagen con porcentajes.
     user_prompt = (
-        "Analiza la imagen adjunta y genera un JSON con los 13 tipos de postura "
+        "Analiza la imagen adjunta y genera un JSON con los 12 tipos de postura "
         "listados en el mensaje de sistema. Para cada postura, coloca un número "
         "entero de 0 a 100 que indique la probabilidad o predominancia estimada. "
         "No incluyas explicaciones; solo devuelve el objeto JSON."
@@ -165,6 +170,7 @@ async def api_analysis_worker():
         session_id = payload["session_id"]
         jpeg        = payload["jpeg"]
         bad_time    = payload["bad_time"]
+        device_id    = payload["device_id"]
         b64 = base64.b64encode(jpeg).decode("utf-8")
         try:
             messages = build_openai_messages(b64)
@@ -225,6 +231,10 @@ async def api_analysis_worker():
                        }
                        r.rpush(f"timeline:{session_id}", json.dumps(evt))
                        r.ltrim(f"timeline:{session_id}", -200, -1)
+                       asyncio.create_task(
+                            enviar_alerta_paciente_bg(device_id, top_label, bad_time)
+                       )
+                       logger.info("Alerta enviada al paciente.")
                    except Exception:
                        logger.exception("Error guardando timeline")
                except Exception:
@@ -239,6 +249,35 @@ async def api_analysis_worker():
         finally:
             api_analysis_queue.task_done()
             
+            
+async def enviar_alerta_paciente_bg(device_id, etiqueta, bad_time):
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        partial(enviar_alerta_paciente_sync, device_id, etiqueta, bad_time)
+    )
+            
+def enviar_alerta_paciente_sync(device_id: str,
+                                etiqueta: str,
+                                bad_time: str):
+    
+    redis_shpd_key = f"shpd-data:{device_id}"
+    telegram_id = r.hget(redis_shpd_key, "telegram_id")
+
+    resumen = (
+        f"🚨 <b>Alerta postural</b>\n"
+        f"Postura detectada: <b>{etiqueta}</b>\n"
+        f"Tiempo en mala postura: {bad_time}seg\n"
+    )
+
+    payload = {"telegram_id": telegram_id, "resumen": resumen}
+    try:
+        resp = requests.post(BOT_API_URL, json=payload, timeout=5)
+        resp.raise_for_status()
+        logger.info("Alerta enviada al paciente.")
+    except Exception as e:
+        logger.error(f"Error enviando alerta a paciente: {e}")
+        
 
 # En startup, lanza el worker en background
 @asynccontextmanager
@@ -248,6 +287,7 @@ async def lifespan(app: FastAPI):
     yield  
     
 app = FastAPI(lifespan=lifespan)
+app.state.input_ws_by_device = {}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -268,6 +308,7 @@ processed_frames_queue = asyncio.Queue(maxsize=10)
 @app.websocket("/video/input/{device_id}")
 async def video_input(websocket: WebSocket, device_id: str):
     await websocket.accept()
+    ws_manager.inputs[device_id] = websocket
     loop = asyncio.get_running_loop()
     
     # Detectar modo calibración: query ?calibracion=1
@@ -298,7 +339,7 @@ async def video_input(websocket: WebSocket, device_id: str):
             # 2. Si el session_id cambió, reinicializar PostureMonitor con el modo correcto
             if session_id != current_session_id:
                 logger.info(f"📋 Session ID cambió de {current_session_id} a {session_id}")
-                posture_monitor = PostureMonitor(session_id, save_metrics=not calibrating)
+                posture_monitor = PostureMonitor(session_id, save_metrics=not calibrating, device_id=device_id)
                 current_session_id = session_id
                 logger.info(f"✅ PostureMonitor reinicializado para session {session_id}")
 
@@ -329,7 +370,8 @@ async def video_input(websocket: WebSocket, device_id: str):
                     await api_analysis_queue.put({
                         "session_id": session_id,
                         "jpeg": jpeg,
-                        "bad_time": bad_time
+                        "bad_time": bad_time,
+                        "device_id": device_id
                     })
                     r.delete(raw_key)
                     logger.debug(f"✔️ Disparo para analisis ejecutado para sesión {session_id}")
@@ -340,6 +382,7 @@ async def video_input(websocket: WebSocket, device_id: str):
         logger.error(f"Error en video_input: {e}")
         logger.exception("Detalles del error:")
     finally:
+        ws_manager.inputs.pop(device_id, None)
         logger.info(f"Cerrando WebSocket para device_id: {device_id}")
 
 @app.websocket("/video/output")

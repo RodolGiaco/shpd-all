@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: shpd-backend:1.7.0
+        image: shpd-backend:2.0.1
         ports:
         - containerPort: 8765
           hostPort: 8765

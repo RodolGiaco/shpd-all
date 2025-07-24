@@ -16,19 +16,18 @@ interface Props {
 }
 
 const POSTURAS_FIJAS = [
-  "Sentado erguido",
-  "Inclinación hacia adelante",
-  "Inclinación hacia atrás",
-  "Inclinación hacia la izquierda",
-  "Inclinación hacia la derecha",
+  "Tronco flexionado",
+  "Tronco extendido",
+  "Tronco inclinado lateral izquierda",
+  "Tronco inclinado lateral derecho",
   "Mentón en mano",
   "Piernas cruzadas",
   "Rodillas elevadas o muy bajas",
-  "Hombros encogidos",
-  "Brazos sin apoyo",
+  "Elevación escapular",
+  "Antebrazo sin apoyo",
   "Cabeza adelantada",
-  "Encorvarse hacia adelante",
-  "Sentarse en el borde del asiento",
+  "Cifosis torácica aumentada",
+  "Pelvis adelantada respecto respaldo",
 ];
 
 const HistoryChart: React.FC<Props> = ({ sesionId }) => {

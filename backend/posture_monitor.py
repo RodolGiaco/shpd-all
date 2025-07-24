@@ -15,11 +15,12 @@ r = redis.Redis(host='redis', port=6379, decode_responses=True)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 class PostureMonitor:
-    def __init__(self,  session_id: str, *, save_metrics: bool = True):
+    def __init__(self,  session_id: str, *, save_metrics: bool = True, device_id: str):
         logger.info(f"[PostureMonitor] Instanciado para session_id={session_id} save_metrics={save_metrics}")
         self.mp_drawing = mp.solutions.drawing_utils
         self.session_id = session_id
         self.save_metrics = save_metrics
+        self.device_id = device_id
 
         # Si estamos en modo calibración, reiniciar los contadores de Redis
         if not self.save_metrics:
@@ -31,19 +32,7 @@ class PostureMonitor:
                 logger.exception("Error al reiniciar la clave de calibración")
         self.mp_pose = mp.solutions.pose  # RPI3 FIX
         self.args = self.parse_arguments()
-
-        if os.path.exists("calibration.json"):
-            with open("calibration.json", "r") as f:
-                data = json.load(f)
-                self.args.offset_threshold = data.get("offset_threshold", self.args.offset_threshold)
-                self.args.neck_angle_threshold = data.get("neck_angle_threshold", self.args.neck_angle_threshold)
-                self.args.torso_angle_threshold = data.get("torso_angle_threshold", self.args.torso_angle_threshold)
-                self.args.time_threshold = data.get("time_threshold", self.args.time_threshold)
-            print("\U0001F4E5 Umbrales cargados desde calibration.json:")  # JSON FIX
-            print(f"Offset: {self.args.offset_threshold}, Neck: {self.args.neck_angle_threshold}, Torso: {self.args.torso_angle_threshold}, Tiempo: {self.args.time_threshold}")  # JSON FIX
-        else:
-            print("⚠️  calibration.json no encontrado. Usando valores por defecto o línea de comandos.")  # JSON FIX
-
+       
         self.font = cv2.FONT_HERSHEY_SIMPLEX
         self.pose = self.mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
         self.good_frames = 0
@@ -52,6 +41,10 @@ class PostureMonitor:
         self.flag_alert = True
         self.flag_transition = True
         
+        try:
+             self.time_threshold = int(r.get(f"alert_threshold:{self.device_id}") or 10)
+        except ValueError:
+            self.time_threshold = 10
 
     def findDistance(self, x1, y1, x2, y2):
         dist = m.sqrt((x2 - x1)**2 + (y2 - y1)**2)
@@ -62,19 +55,13 @@ class PostureMonitor:
         degree = int(180/m.pi) * theta
         return degree
 
-    def sendWarning(self):
-        pass
-
     def parse_arguments(self):
         parser = argparse.ArgumentParser(description='Posture Monitor with MediaPipe')
         parser.add_argument('--video', type=str, default=0, help='Path to the input video file. If not provided, the webcam will be used.')
         parser.add_argument('--offset-threshold', type=float, default=100, help='Threshold value for shoulder alignment.')  # JSON FIX
         parser.add_argument('--neck-angle-threshold', type=float, default=25, help='Threshold value for neck inclination angle.')  # JSON FIX
         parser.add_argument('--torso-angle-threshold', type=float, default=10, help='Threshold value for torso inclination angle.')  # JSON FIX
-        parser.add_argument('--time-threshold', type=int, default=10, help='Time threshold for triggering a posture alert.')
         return parser.parse_args()
-
-
 
     def save_data_to_redis(self, datos: dict):
             key = f"metricas:{self.session_id}"
@@ -126,7 +113,7 @@ class PostureMonitor:
             self.bad_frames += 1
             self.all_frames += 1
             color = (50, 50, 255)
-            
+            self.flag_alert = True
             # HINCRBY crea el campo si no existe y suma 1
             r.hincrby(buffer_key, "bad_frames", 1)
        
@@ -162,9 +149,8 @@ class PostureMonitor:
             cv2.putText(image, time_string_bad, (10, h - 20), self.font, 0.9, (50, 50, 255), 2)
 
         if self.save_metrics:
-            if bad_time > self.args.time_threshold:
+            if bad_time > self.time_threshold:
                 if self.flag_alert:
-                    self.sendWarning()
                     raw_key = f"raw_frame:{self.session_id}"
                     r.hincrby(buffer_key, "alert_count", 1)
                     logger.debug("✔️ start")
@@ -173,6 +159,13 @@ class PostureMonitor:
                     self.flag_alert = False
                     logger.debug("✔️ Data save for alert")
                     self.bad_frames = 0
+                    try:
+                        self.time_threshold = int(r.get(f"alert_threshold:{self.device_id}"))
+                        logger.info(f"⏱ Umbral de alerta desde Redis: {self.time_threshold}s")
+                    except Exception:
+                        logger.exception("Error leyendo alert_threshold en Redis")  
+               
+                 
 
         try:
             accum = r.hgetall(buffer_key)

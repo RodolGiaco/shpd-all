@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from typing import List
 from api.database import get_db
-from api.models import Sesion, Paciente, PosturaCount, MetricaPostural
+from api.models import Sesion, Paciente, PosturaCount, MetricaPostural, Especialista
 from api.schemas import SesionIn, SesionOut
 import time
 import redis
@@ -13,6 +13,8 @@ import json
 import logging
 import uuid
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
+
 
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 router = APIRouter(prefix="/sesiones", tags=["sesiones"])
@@ -59,10 +61,12 @@ def get_session_progress(session_id: str):
 
 def enviar_reporte_telegram(session_id, device_id, db: Session):
     paciente = db.query(Paciente).filter(Paciente.device_id == device_id).first()
+    especialista = get_especialista(db)
+
     if not paciente:
         raise Exception("Paciente no encontrado para el device_id")
-    telegram_id = paciente.telegram_id
-
+    pac_telegram_id = paciente.telegram_id
+    esp_telegram_id = especialista.telegram_id
     # Obtener fecha de inicio desde Redis
     data = r.hgetall(f"shpd-session:{session_id}")
     start_ts = int(data.get("start_ts", 0))
@@ -103,7 +107,7 @@ def enviar_reporte_telegram(session_id, device_id, db: Session):
     r.delete(f"metricas:{session_id}")
     r.delete(f"analysis:{session_id}")
     # 3. Llamar al bot por HTTP
-    payload = {"telegram_id": telegram_id, "resumen": resumen}
+    payload = {"telegram_id": esp_telegram_id, "resumen": resumen}
     try:
         resp = requests.post(BOT_API_URL, json=payload, timeout=5)
         resp.raise_for_status()
@@ -188,3 +192,10 @@ def reiniciar_sesion(session_id: str, device_id: str | None = Query(None), db: S
 
     logger.info(f"🔄 Sesión {session_id} reiniciada (revivida si era necesario) - device_id restaurado: {device_id}")
     return {"ok": True, "message": "Sesión reiniciada", "session_id": session_id}
+
+
+def get_especialista(db: Session):
+    return db.execute(select(Especialista)).scalar_one()
+
+
+ 

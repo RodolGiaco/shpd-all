@@ -15,6 +15,14 @@ class Paciente(Base):
     edad = Column(Integer)
     sexo = Column(String)
     diagnostico = Column(String)
+    
+        
+class Especialista(Base):
+    __tablename__ = "especialistas"
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(String, unique=True, index=True, nullable=False)
+    nombre = Column(String, nullable=False)
+    edad = Column(Integer)
 
 
 class MetricaPostural(Base):
